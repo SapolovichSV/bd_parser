@@ -1,0 +1,12 @@
+[package]
+name = "parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+quick-xml = { version = "0.38.3", features = ["serialize"] }
+reqwest = "0.12.23"
+scraper = { version = "0.24.0", features = ["serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.47.1", features = ["full"] }
