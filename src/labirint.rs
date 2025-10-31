@@ -1,5 +1,6 @@
 use crate::parse_traits::{self, Author, BookParser, Isbn, Sites, Title};
 use anyhow::anyhow;
+use tracing::{instrument, warn, info};
 
 pub struct LabirintParser;
 impl BookParser for LabirintParser {
@@ -8,14 +9,17 @@ impl BookParser for LabirintParser {
 
     type Context = scraper::Html;
 
+    #[instrument(skip(self), fields(url=%url))]
     async fn fetch(&self, url: &Self::Url) -> anyhow::Result<Self::Context> {
         if !url.contains("books") {
+            warn!(target: "time", %url, "Rejected non-book URL");
             return Err(anyhow!("bad url").context(url.to_string()));
         }
         let page = reqwest::get(url).await?.text().await?;
         Ok(scraper::Html::parse_document(&page))
     }
 
+    #[instrument(skip(self, ctx), fields(url=%url))]
     async fn parse_authors(
         &self,
         ctx: &Self::Context,
@@ -31,6 +35,7 @@ impl BookParser for LabirintParser {
             .collect())
     }
 
+    #[instrument(skip(self, ctx), fields(url=%url))]
     async fn parse_isbn(&self, ctx: &scraper::Html, url: &Self::Url) -> anyhow::Result<Isbn> {
         let isbn_selector =
             scraper::Selector::parse("._right_u86in_12 > div:nth-child(2) > div:nth-child(2)")
@@ -38,12 +43,36 @@ impl BookParser for LabirintParser {
 
         match ctx.select(&isbn_selector).next_back() {
             Some(elem) => {
-                let isbn_text: String = elem.text().collect::<String>().replace("\u{a0}", "");
-                Isbn::new(isbn_text)
+                let raw: String = elem.text().collect::<String>().replace("\u{a0}", "");
+                let tokens: Vec<&str> = raw
+                    .split([',', ';'])
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if tokens.len() > 1 {
+                    info!(count = tokens.len(), %url, "multiple ISBNs found, preferring ISBN-13");
+                }
+                let mut first_valid: Option<Isbn> = None;
+                for t in &tokens {
+                    if let Ok(isbn) = Isbn::new((*t).to_string()) {
+                        if first_valid.is_none() {
+                            first_valid = Some(isbn.clone());
+                        }
+                        if isbn.as_str().len() == 13 {
+                            return Ok(isbn);
+                        }
+                    }
+                }
+                if let Some(isbn) = first_valid { return Ok(isbn); }
+                Isbn::new(raw)
             }
-            None => Err(anyhow!("can't find isbn on this page").context(url.to_string())),
+            None => {
+                warn!(target: "time", %url, "ISBN not found on page");
+                Err(anyhow!("can't find isbn on this page").context(url.to_string()))
+            },
         }
     }
+    #[instrument(skip(self, ctx), fields(url=%log_url))]
     async fn parse_title(
         &self,
         ctx: &Self::Context,

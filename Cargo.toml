@@ -10,3 +10,6 @@ reqwest = "0.12.23"
 scraper = { version = "0.24.0", features = ["atomic", "serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.47.1", features = ["full"] }
+tracing = { version = "0.1", features = ["attributes"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi", "time"] }
+tracing-appender = "0.2"
