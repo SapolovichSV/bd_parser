@@ -1,0 +1,16 @@
+# ~/.cargo/config.toml или ./.cargo/config.toml
+
+[target.'cfg(all())']
+# Можно добавить дополнительные флаги, если нужно
+rustflags = []
+
+[build]
+rustdocflags = []
+
+[env]
+# Используем Clippy как компилятор
+RUSTC_WORKSPACE_WRAPPER = "clippy-driver"
+
+# Включаем pedantic-режим и запрещаем лишние предупреждения
+CLIPPY_ARGS = "--all-targets --all-features -- -W clippy::pedantic"
+

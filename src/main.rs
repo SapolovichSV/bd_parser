@@ -1,10 +1,12 @@
-use parser::Book;
 use std::error::Error;
 
 use quick_xml::de::from_str;
-use reqwest;
-use scraper::{Html, Selector};
 use serde::Deserialize;
+
+use crate::labirint::*;
+use crate::parse_traits::{Book, BookParser};
+mod labirint;
+mod parse_traits;
 #[derive(Debug, Deserialize)]
 struct BookUrl {
     loc: String,
@@ -21,19 +23,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let resp = reqwest::get(URL1).await?.text().await?;
     let urlset: UrlSet = from_str(&resp)?;
     // println!("{urlset:#?}");
+    //
 
-    println!("parsing book with url: {}", urlset.urls[0].loc.clone());
+    println!("len: {}", urlset.urls.len());
 
-    let books: Vec<String> = (0..3).map(|i| urlset.urls[i].loc.clone()).collect();
-    let books = get_books(books).await?;
-    println!("{books:?}");
+    let pars = LabirintParser;
+    let urls = urlset.urls.iter().take(10);
+    for url in urls {
+        let book = parse_book_page(&pars, url.loc.clone()).await?;
+        println!("{book:#?}");
+    }
+    // let mut set = JoinSet::new();
+
+    // for url in urlset.urls.iter().take(100) {
+    //     let parser = &pars;
+    //     let url = url.loc.clone();
+    //     parse_book_page(parser, url).await?;
+    // }
 
     Ok(())
 }
-async fn get_books(urls: Vec<String>) -> anyhow::Result<Vec<Book<String>>> {
-    let mut books = vec![];
-    for url in urls {
-        books.push(Book::new(url).await?);
-    }
-    Ok(books)
+async fn parse_book_page<T: BookParser>(parser: &T, url: T::Url) -> anyhow::Result<Book<T::Url>> {
+    parser.parse_book(url).await
 }

@@ -1,0 +1,15 @@
+{
+  "cargo": {
+    "allFeatures": true
+  },
+  "procMacro": {
+    "enable": true
+  },
+  "check": {
+    "command": "clippy",
+    "extraArgs": ["warnings"]
+  }
+  "rust-analyzer.check.command": "clippy"
+  
+}
+
