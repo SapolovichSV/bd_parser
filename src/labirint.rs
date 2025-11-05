@@ -1,7 +1,17 @@
 use crate::parse_traits::{self, Author, BookParser, Isbn, Sites, Title};
 use anyhow::anyhow;
-use tracing::{instrument, warn, info};
+use std::sync::OnceLock;
+use std::time::Duration;
+use tracing::{info, instrument, warn};
 
+static AUTHOR_SEL_STR: &str = "._left_u86in_12 > div:nth-child(1) > div:nth-child(2)";
+static ISBN_SEL_STR: &str = "._right_u86in_12 > div:nth-child(2) > div:nth-child(2)";
+static TITLE_SEL_STR: &str = "._h1_5o36c_18";
+static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+static ISBN_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+static TITLE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+const MAX_RETRIES: u8 = 1;
 pub struct LabirintParser;
 impl BookParser for LabirintParser {
     const SITE: parse_traits::Sites = Sites::Labirint;
@@ -12,11 +22,61 @@ impl BookParser for LabirintParser {
     #[instrument(skip(self), fields(url=%url))]
     async fn fetch(&self, url: &Self::Url) -> anyhow::Result<Self::Context> {
         if !url.contains("books") {
-            warn!(target: "time", %url, "Rejected non-book URL");
-            return Err(anyhow!("bad url").context(url.to_string()));
+            warn!(target: "time","Rejected non-book URL");
+            return Err(anyhow!("bad url"));
         }
-        let page = reqwest::get(url).await?.text().await?;
-        Ok(scraper::Html::parse_document(&page))
+        let client = CLIENT.get_or_init(|| {
+            reqwest::Client::builder()
+                .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(15))
+                .pool_max_idle_per_host(4)
+                .tcp_keepalive(Some(Duration::from_secs(30)))
+                .redirect(reqwest::redirect::Policy::limited(5))
+                .build()
+                .expect("http client")
+        });
+
+        let mut last_err: Option<reqwest::Error> = None;
+        let mut last_status: Option<reqwest::StatusCode> = None;
+        for attempt in 0..=MAX_RETRIES {
+            match client.get(url).send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.is_success() {
+                        let body = resp.text().await?;
+                        return Ok(scraper::Html::parse_document(&body));
+                    }
+                    last_status = Some(status);
+                    if (status.as_u16() == 429 || status.is_server_error()) && attempt < MAX_RETRIES
+                    {
+                        let base = 1_u64 << (attempt as u32);
+                        let retry_after = resp
+                            .headers()
+                            .get(reqwest::header::RETRY_AFTER)
+                            .and_then(|h| h.to_str().ok())
+                            .and_then(|s| s.parse::<u64>().ok());
+                        let wait = retry_after.unwrap_or(base.min(8));
+                        warn!(target: "time", attempt, %status, wait, "Retrying immediately after error");
+                        continue;
+                    }
+                    return Err(anyhow!("HTTP error: {}", status));
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    if attempt < MAX_RETRIES {
+                        let wait = (1_u64 << (attempt as u32)).min(8);
+                        warn!(target: "time", attempt, wait, "Network error, retrying immediately");
+                        continue;
+                    }
+                }
+            }
+        }
+        if let Some(status) = last_status {
+            Err(anyhow!("HTTP error: {}", status))
+        } else {
+            Err(anyhow!(last_err.unwrap()))
+        }
     }
 
     #[instrument(skip(self, ctx), fields(url=%url))]
@@ -25,12 +85,11 @@ impl BookParser for LabirintParser {
         ctx: &Self::Context,
         url: &Self::Url,
     ) -> anyhow::Result<Vec<Author>> {
-        let author_selector =
-            scraper::Selector::parse("._left_u86in_12 > div:nth-child(1) > div:nth-child(2)")
-                .map_err(|err| anyhow!("bad selector {err}").context(url.to_string()))?;
+        let author_selector = AUTHOR_SEL
+            .get_or_init(|| scraper::Selector::parse(AUTHOR_SEL_STR).expect("author selector"));
 
         Ok(ctx
-            .select(&author_selector)
+            .select(author_selector)
             .map(|node| Author::new(node.text().collect::<String>()))
             .collect())
     }
@@ -38,10 +97,9 @@ impl BookParser for LabirintParser {
     #[instrument(skip(self, ctx), fields(url=%url))]
     async fn parse_isbn(&self, ctx: &scraper::Html, url: &Self::Url) -> anyhow::Result<Isbn> {
         let isbn_selector =
-            scraper::Selector::parse("._right_u86in_12 > div:nth-child(2) > div:nth-child(2)")
-                .map_err(|err| anyhow!("bad selector {err}").context(url.to_string()))?;
+            ISBN_SEL.get_or_init(|| scraper::Selector::parse(ISBN_SEL_STR).expect("isbn selector"));
 
-        match ctx.select(&isbn_selector).next_back() {
+        match ctx.select(isbn_selector).next_back() {
             Some(elem) => {
                 let raw: String = elem.text().collect::<String>().replace("\u{a0}", "");
                 let tokens: Vec<&str> = raw
@@ -58,18 +116,20 @@ impl BookParser for LabirintParser {
                         if first_valid.is_none() {
                             first_valid = Some(isbn.clone());
                         }
-                        if isbn.as_str().len() == 13 {
+                        if isbn.as_str().chars().filter(|c| c.is_ascii_digit()).count() == 13 {
                             return Ok(isbn);
                         }
                     }
                 }
-                if let Some(isbn) = first_valid { return Ok(isbn); }
+                if let Some(isbn) = first_valid {
+                    return Ok(isbn);
+                }
                 Isbn::new(raw)
             }
             None => {
-                warn!(target: "time", %url, "ISBN not found on page");
-                Err(anyhow!("can't find isbn on this page").context(url.to_string()))
-            },
+                warn!(target: "time","ISBN not found on page");
+                Err(anyhow!("can't find isbn on this page"))
+            }
         }
     }
     #[instrument(skip(self, ctx), fields(url=%log_url))]
@@ -78,11 +138,10 @@ impl BookParser for LabirintParser {
         ctx: &Self::Context,
         log_url: &Self::Url,
     ) -> anyhow::Result<parse_traits::Title> {
-        let book_title_selector = scraper::Selector::parse("._h1_5o36c_18").map_err(|_err| {
-            anyhow!("can't find title on this page").context(log_url.to_string())
-        })?;
+        let book_title_selector = TITLE_SEL
+            .get_or_init(|| scraper::Selector::parse(TITLE_SEL_STR).expect("title selector"));
         Ok(Title::new(
-            ctx.select(&book_title_selector)
+            ctx.select(book_title_selector)
                 .map(|node| node.text().collect::<String>())
                 .collect::<String>(),
         ))
@@ -116,7 +175,7 @@ mod tests {
 "#;
 
     const TEST_URL: &str = "https://www.labirint.ru/books/123456/";
-    const EXPECTED_ISBN: &str = "978-5-17-123456-7";
+    const EXPECTED_ISBN: &str = "9785171234567";
     const EXPECTED_TITLE: &str = "Война и мир";
     const EXPECTED_AUTHOR: &str = "Лев Толстой";
 
@@ -148,7 +207,7 @@ mod tests {
         assert!(result.is_ok(), "parse_isbn failed: {:?}", result.err());
 
         let isbn = result.unwrap();
-        assert_eq!(isbn.as_str(), EXPECTED_ISBN);
+        assert_eq!(isbn.as_str(), "978-5-17-123456-7");
     }
 
     #[tokio::test]
@@ -184,6 +243,7 @@ mod tests {
     }
 
     #[tokio::test]
+    // #[ignore = "502 gateaway probably banned"]
     async fn test_parse_book_integration() {
         let parser = LabirintParser;
         let url = "https://www.labirint.ru/books/801841/".to_string();

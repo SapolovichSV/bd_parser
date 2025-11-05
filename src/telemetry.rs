@@ -1,6 +1,5 @@
 use std::error::Error;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
-
+use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 pub fn init_tracing() -> Result<tracing_appender::non_blocking::WorkerGuard, Box<dyn Error>> {
     // Ensure logs directory exists
     std::fs::create_dir_all("logs")?;
@@ -16,7 +15,9 @@ pub fn init_tracing() -> Result<tracing_appender::non_blocking::WorkerGuard, Box
         .with_ansi(true)
         .with_target(false)
         .without_time()
-        .with_filter(tracing_subscriber::filter::filter_fn(|meta| meta.target() != "time"));
+        .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
+            meta.target() != "time"
+        }));
 
     // Terminal: timestamp only for target "time"
     let stdout_ts = tracing_subscriber::fmt::layer()
@@ -24,7 +25,9 @@ pub fn init_tracing() -> Result<tracing_appender::non_blocking::WorkerGuard, Box
         .with_ansi(true)
         .with_target(false)
         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_filter(tracing_subscriber::filter::filter_fn(|meta| meta.target() == "time"));
+        .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
+            meta.target() == "time"
+        }));
 
     // File: no ANSI, no timestamp by default
     let file_no_ts = tracing_subscriber::fmt::layer()
@@ -32,7 +35,9 @@ pub fn init_tracing() -> Result<tracing_appender::non_blocking::WorkerGuard, Box
         .with_ansi(false)
         .with_target(false)
         .without_time()
-        .with_filter(tracing_subscriber::filter::filter_fn(|meta| meta.target() != "time"));
+        .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
+            meta.target() != "time"
+        }));
 
     // File: timestamp only for target "time"
     let file_ts = tracing_subscriber::fmt::layer()
@@ -40,7 +45,9 @@ pub fn init_tracing() -> Result<tracing_appender::non_blocking::WorkerGuard, Box
         .with_ansi(false)
         .with_target(false)
         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_filter(tracing_subscriber::filter::filter_fn(|meta| meta.target() == "time"));
+        .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
+            meta.target() == "time"
+        }));
 
     tracing_subscriber::registry()
         .with(filter)
@@ -48,6 +55,6 @@ pub fn init_tracing() -> Result<tracing_appender::non_blocking::WorkerGuard, Box
         .with(stdout_ts)
         .with(file_no_ts)
         .with(file_ts)
-        .init();
+        .try_init()?;
     Ok(guard)
 }

@@ -9,8 +9,9 @@ pub struct Isbn(String);
 impl Isbn {
     pub fn new(s: String) -> Result<Self> {
         let cleaned = s.trim().replace(['-', ' '], "");
-        if cleaned.len() >= 10 && cleaned.len() <= 13 && cleaned.chars().all(|c| c.is_ascii_digit()) {
-            Ok(Isbn(cleaned))
+        if cleaned.len() >= 10 && cleaned.len() <= 13 && cleaned.chars().all(|c| c.is_ascii_digit())
+        {
+            Ok(Self(s))
         } else {
             anyhow::bail!("Invalid ISBN length or format: {}", cleaned.len())
         }
@@ -23,7 +24,7 @@ impl Isbn {
 
 impl TryFrom<String> for Isbn {
     type Error = anyhow::Error;
-    
+
     fn try_from(s: String) -> Result<Self> {
         Isbn::new(s)
     }
@@ -50,7 +51,7 @@ impl Author {
 
 impl TryFrom<String> for Author {
     type Error = anyhow::Error;
-    
+
     fn try_from(s: String) -> Result<Self> {
         Ok(Author::new(s))
     }
@@ -77,7 +78,7 @@ impl Title {
 
 impl TryFrom<String> for Title {
     type Error = anyhow::Error;
-    
+
     fn try_from(s: String) -> Result<Self> {
         Ok(Title::new(s))
     }
@@ -91,6 +92,15 @@ impl Display for Title {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sites {
     Labirint,
+    IgraSlov,
+}
+impl Display for Sites {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Labirint => write!(f, "labirint"),
+            Self::IgraSlov => write!(f, "igra_slov"),
+        }
+    }
 }
 #[derive(Debug)]
 pub struct Book<T: IntoUrl + Into<String> + Display + Clone> {
