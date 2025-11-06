@@ -102,29 +102,13 @@ impl BookParser for LabirintParser {
         match ctx.select(isbn_selector).next_back() {
             Some(elem) => {
                 let raw: String = elem.text().collect::<String>().replace("\u{a0}", "");
-                let tokens: Vec<&str> = raw
-                    .split([',', ';'])
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                if tokens.len() > 1 {
-                    info!(count = tokens.len(), %url, "multiple ISBNs found, preferring ISBN-13");
-                }
-                let mut first_valid: Option<Isbn> = None;
-                for t in &tokens {
-                    if let Ok(isbn) = Isbn::new((*t).to_string()) {
-                        if first_valid.is_none() {
-                            first_valid = Some(isbn.clone());
-                        }
-                        if isbn.as_str().chars().filter(|c| c.is_ascii_digit()).count() == 13 {
-                            return Ok(isbn);
-                        }
+                match Isbn::try_from(raw) {
+                    Ok(isbn) => Ok(isbn),
+                    Err(e) => {
+                        warn!("can't parse isbn:{e}");
+                        Err(anyhow!("can't parse isbn"))
                     }
                 }
-                if let Some(isbn) = first_valid {
-                    return Ok(isbn);
-                }
-                Isbn::new(raw)
             }
             None => {
                 warn!(target: "time","ISBN not found on page");
@@ -145,6 +129,22 @@ impl BookParser for LabirintParser {
                 .map(|node| node.text().collect::<String>())
                 .collect::<String>(),
         ))
+    }
+    #[instrument(skip(self), fields(url=%url))]
+    async fn parse_book(&self, url: Self::Url) -> anyhow::Result<parse_traits::Book<Self::Url>> {
+        info!(target: "time","start processing");
+        let ctx = self.fetch(&url).await?;
+        let authors = self.parse_authors(&ctx, &url).await?;
+        let title = self.parse_title(&ctx, &url).await?;
+        let isbn = self.parse_isbn(&ctx, &url).await?;
+        info!(target: "time","ended processing");
+        Ok(parse_traits::Book {
+            authors,
+            isbn,
+            source: url,
+            title,
+            site: Self::SITE,
+        })
     }
 }
 

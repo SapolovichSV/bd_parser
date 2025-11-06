@@ -1,5 +1,6 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use std::fmt::Display;
+use tracing::info;
 
 use reqwest::IntoUrl;
 
@@ -7,7 +8,7 @@ use reqwest::IntoUrl;
 pub struct Isbn(String);
 
 impl Isbn {
-    pub fn new(s: String) -> Result<Self> {
+    fn new(s: String) -> Result<Self> {
         let cleaned = s.trim().replace(['-', ' '], "");
         if cleaned.len() >= 10 && cleaned.len() <= 13 && cleaned.chars().all(|c| c.is_ascii_digit())
         {
@@ -20,13 +21,34 @@ impl Isbn {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+    fn parse(raw: String) -> anyhow::Result<String> {
+        let tokens: Vec<&str> = raw
+            .split([',', ';'])
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if tokens.is_empty() {
+            return Err(anyhow!("no isbn detected"));
+        }
+        if let Some(isbn13) = tokens.iter().find(|t| Isbn::is_digit_13(t)) {
+            info!(
+                count = tokens.len(),
+                "multiplie ISBNs found, preferring ISBN-13"
+            );
+            return Ok(isbn13.to_string());
+        }
+        Ok(tokens.last().unwrap().to_string())
+    }
+    fn is_digit_13(isbn: &str) -> bool {
+        isbn.chars().filter(|c| c.is_ascii_digit()).count() == 13
+    }
 }
 
 impl TryFrom<String> for Isbn {
     type Error = anyhow::Error;
 
     fn try_from(s: String) -> Result<Self> {
-        Isbn::new(s)
+        Isbn::new(Isbn::parse(s)?)
     }
 }
 
