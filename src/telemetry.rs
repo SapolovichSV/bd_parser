@@ -1,5 +1,19 @@
+//! Logging and tracing configuration.
+//!
+//! Provides structured logging with different outputs for console and file.
+
 use std::error::Error;
-use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+
+/// Initializes the tracing subscriber with console and file outputs.
+/// 
+/// # Features
+/// - Console output: ANSI colors, no timestamps (except for "time" target)
+/// - File output: No ANSI colors, timestamps for "time" target  
+/// - Daily rolling log files in the `logs/` directory
+/// 
+/// # Returns
+/// A guard that must be kept alive for the file appender to continue working.
 pub fn init_tracing() -> Result<tracing_appender::non_blocking::WorkerGuard, Box<dyn Error>> {
     // Ensure logs directory exists
     std::fs::create_dir_all("logs")?;

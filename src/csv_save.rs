@@ -1,11 +1,15 @@
+//! CSV serialization trait for book data.
+
 use std::fmt::Display;
 
 use reqwest::IntoUrl;
 
 use crate::parse_traits::Book;
 
-pub static BOOK_CSV_HEADERS: &[&str] = &["site", "source", "isbn", "title", "authors"];
+/// CSV header column names for book exports.
+const BOOK_CSV_HEADERS: &[&str] = &["site", "source", "isbn", "title", "authors"];
 
+/// Trait for types that can be serialized to CSV format.
 pub trait CsvSave {
     fn csv_headers() -> &'static [&'static str];
     fn write_csv_record<W: std::io::Write>(&self, wtr: &mut csv::Writer<W>) -> csv::Result<()>;
