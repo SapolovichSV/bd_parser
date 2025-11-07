@@ -62,8 +62,9 @@ impl BookParser for IgraSlov {
             .map(|node| Author::new(node.text().collect::<String>()))
             .collect())
     }
-    #[instrument(skip(self,ctx),fields(url=%log_url))]
-    async fn parse_isbn(&self, ctx: &Self::Context, log_url: &Self::Url) -> anyhow::Result<Isbn> {
+    #[instrument(skip(self, ctx, _log_url))]
+    // TODO fix selector https://igraslov.store/product/serebryakov-a-fistula-gorodets-klap/
+    async fn parse_isbn(&self, ctx: &Self::Context, _log_url: &Self::Url) -> anyhow::Result<Isbn> {
         let isbn_selector =
             ISBN_SEL.get_or_init(|| scraper::Selector::parse(ISBN_SEL_STR).expect("isbn selector"));
 
@@ -124,7 +125,11 @@ mod tests {
         let url = "https://igraslov.store/product/example".to_string();
         let isbn = parser.parse_isbn(&ctx, &url).await.expect("isbn ok");
         let digits = isbn.as_str().chars().filter(|c| c.is_ascii_digit()).count();
-        assert!(digits == 10 || digits == 13, "unexpected isbn digits count: {}", digits);
+        assert!(
+            digits == 10 || digits == 13,
+            "unexpected isbn digits count: {}",
+            digits
+        );
     }
 
     #[tokio::test]

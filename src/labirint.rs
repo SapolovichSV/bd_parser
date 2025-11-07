@@ -57,7 +57,8 @@ impl BookParser for LabirintParser {
                             .and_then(|h| h.to_str().ok())
                             .and_then(|s| s.parse::<u64>().ok());
                         let wait = retry_after.unwrap_or(base.min(8));
-                        warn!(target: "time", attempt, %status, wait, "Retrying immediately after error");
+                        warn!(target: "time", attempt, %status, wait, "Retrying after backoff");
+                        tokio::time::sleep(Duration::from_secs(wait)).await;
                         continue;
                     }
                     return Err(anyhow!("HTTP error: {}", status));

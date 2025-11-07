@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use std::fmt::Display;
-use tracing::info;
+use tracing::{info, instrument};
 
 use reqwest::IntoUrl;
 
@@ -14,13 +14,14 @@ impl Isbn {
         {
             Ok(Self(s))
         } else {
-            anyhow::bail!("Invalid ISBN length or format: {}", cleaned.len())
+            anyhow::bail!("Invalid ISBN:{} length or format: {}", s, cleaned.len())
         }
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
+    #[instrument(ret)]
     fn parse(raw: String) -> anyhow::Result<String> {
         let tokens: Vec<&str> = raw
             .split([',', ';'])
@@ -47,6 +48,7 @@ impl Isbn {
 impl TryFrom<String> for Isbn {
     type Error = anyhow::Error;
 
+    #[instrument]
     fn try_from(s: String) -> Result<Self> {
         Isbn::new(Isbn::parse(s)?)
     }
