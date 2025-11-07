@@ -6,8 +6,7 @@ use reqwest::IntoUrl;
 
 use crate::parse_traits::Book;
 
-/// CSV header column names for book exports.
-const BOOK_CSV_HEADERS: &[&str] = &["site", "source", "isbn", "title", "authors"];
+pub static BOOK_CSV_HEADERS: &[&str] = &["site", "source", "isbn", "title", "authors"];
 
 /// Trait for types that can be serialized to CSV format.
 pub trait CsvSave {
