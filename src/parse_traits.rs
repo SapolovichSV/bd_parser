@@ -38,6 +38,7 @@ impl Isbn {
     }
 
     /// Returns the ISBN as a string slice.
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -138,6 +139,7 @@ impl Title {
     }
 
     /// Returns the title as a string slice.
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &str {
         &self.0
     }
