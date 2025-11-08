@@ -1,5 +1,28 @@
+//! Logging and tracing configuration.
+//!
+//! Sets up structured logging to both stdout and rolling log files, with
+//! separate formatting for different log targets.
+
 use std::error::Error;
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
+
+/// Initializes the tracing subscriber with both console and file output.
+///
+/// Creates a "logs" directory if it doesn't exist, and sets up:
+/// - Console output with conditional timestamps
+/// - Daily rolling file logs
+/// - Filtering based on RUST_LOG environment variable (defaults to "info")
+///
+/// # Returns
+///
+/// Returns a guard that must be held for the lifetime of the application.
+/// When the guard is dropped, the file writer will be flushed and closed.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The logs directory cannot be created
+/// - The tracing subscriber cannot be initialized
 pub fn init_tracing() -> Result<tracing_appender::non_blocking::WorkerGuard, Box<dyn Error>> {
     // Ensure logs directory exists
     std::fs::create_dir_all("logs")?;

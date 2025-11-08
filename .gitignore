@@ -1,2 +1,5 @@
 /target
 logs/
+*.csv
+books.csv
+labirint.csv

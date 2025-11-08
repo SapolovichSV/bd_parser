@@ -1,25 +1,32 @@
-use anyhow::anyhow;
+//! Parser implementation for IgraSlov.store bookstore.
+
+use anyhow::{Context, anyhow};
 use std::{sync::OnceLock, time::Duration};
 use tracing::{instrument, warn};
 
 use crate::parse_traits::{self, Author, BookParser, Isbn, Sites, Title};
+
+// CSS selectors for extracting book information
 static AUTHOR_SEL_STR: &str = "tr.woocommerce-product-attributes-item:nth-child(1) > td:nth-child(2) > p:nth-child(1) > a:nth-child(1)";
 static ISBN_SEL_STR: &str =
     "tr.woocommerce-product-attributes-item:nth-child(7) > td:nth-child(2) > p:nth-child(1)";
 static TITLE_SEL_STR: &str = ".single-post-title";
 
+// Global state for HTTP client and selectors (initialized once)
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static ISBN_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static TITLE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+
+/// Parser for IgraSlov.store bookstore
 pub struct IgraSlov;
+
 impl BookParser for IgraSlov {
     const SITE: parse_traits::Sites = Sites::IgraSlov;
-
     type Url = String;
-
     type Context = scraper::Html;
-    #[instrument(skip(self),fields(url=%url))]
+    
+    #[instrument(skip(self), fields(url=%url))]
     async fn fetch(&self, url: &Self::Url) -> anyhow::Result<Self::Context> {
         let client = CLIENT.get_or_init(|| {
             reqwest::Client::builder()
@@ -30,66 +37,64 @@ impl BookParser for IgraSlov {
                 .tcp_keepalive(Some(Duration::from_secs(30)))
                 .redirect(reqwest::redirect::Policy::limited(5))
                 .build()
-                .expect("http client")
+                .expect("Failed to build HTTP client")
         });
-        match client.get(url).send().await {
-            Ok(response) if !response.status().is_success() => {
-                warn!(
-                    "bad status code probably rate limit code: {}",
-                    response.status()
-                );
-                return Err(anyhow!("response status is not success"));
-            }
-            Ok(response) => {
-                let resp = response.text().await?;
-                Ok(scraper::Html::parse_document(&resp))
-            }
-            Err(e) => return Err(e.into()),
+        
+        let response = client.get(url).send().await
+            .context("HTTP request failed")?;
+            
+        let status = response.status();
+        if !status.is_success() {
+            warn!("Non-success HTTP status: {} (possible rate limit)", status);
+            return Err(anyhow!("HTTP request returned non-success status: {}", status));
         }
+        
+        let body = response.text().await
+            .context("Failed to read response body")?;
+        Ok(scraper::Html::parse_document(&body))
     }
 
-    #[instrument(skip(self,ctx),fields(url=%log_url))]
+    #[instrument(skip(self, ctx), fields(url=%log_url))]
     async fn parse_authors(
         &self,
         ctx: &Self::Context,
         log_url: &Self::Url,
     ) -> anyhow::Result<Vec<Author>> {
         let author_selector = AUTHOR_SEL
-            .get_or_init(|| scraper::Selector::parse(AUTHOR_SEL_STR).expect("author selector"));
+            .get_or_init(|| scraper::Selector::parse(AUTHOR_SEL_STR)
+                .expect("Invalid author CSS selector"));
 
         Ok(ctx
             .select(author_selector)
             .map(|node| Author::new(node.text().collect::<String>()))
             .collect())
     }
-    #[instrument(skip(self, ctx, _log_url))]
-    // TODO fix selector https://igraslov.store/product/serebryakov-a-fistula-gorodets-klap/
+    
+    #[instrument(skip(self, ctx), fields(url=%_log_url))]
     async fn parse_isbn(&self, ctx: &Self::Context, _log_url: &Self::Url) -> anyhow::Result<Isbn> {
         let isbn_selector =
-            ISBN_SEL.get_or_init(|| scraper::Selector::parse(ISBN_SEL_STR).expect("isbn selector"));
+            ISBN_SEL.get_or_init(|| scraper::Selector::parse(ISBN_SEL_STR)
+                .expect("Invalid ISBN CSS selector"));
 
         match ctx.select(isbn_selector).next_back() {
             Some(elem) => {
-                let raw: String = elem.text().collect::<String>().replace("\u{a0}", "");
-                match Isbn::try_from(raw) {
-                    Ok(isbn) => Ok(isbn),
-                    Err(e) => {
-                        warn!("can't parse isbn:{e}");
-                        Err(anyhow!("can't parse isbn"))
-                    }
-                }
+                let raw: String = elem.text().collect::<String>().replace('\u{a0}', "");
+                Isbn::try_from(raw)
+                    .context("Failed to parse ISBN from page")
             }
             None => {
-                warn!(target: "time","ISBN not found on page");
-                Err(anyhow!("can't find isbn on this page"))
+                warn!(target: "time", "ISBN not found on page");
+                Err(anyhow!("ISBN element not found on page"))
             }
         }
     }
 
-    #[instrument(skip(self,ctx),fields(url=%log_url))]
+    #[instrument(skip(self, ctx), fields(url=%log_url))]
     async fn parse_title(&self, ctx: &Self::Context, log_url: &Self::Url) -> anyhow::Result<Title> {
         let book_title_selector = TITLE_SEL
-            .get_or_init(|| scraper::Selector::parse(TITLE_SEL_STR).expect("title selector"));
+            .get_or_init(|| scraper::Selector::parse(TITLE_SEL_STR)
+                .expect("Invalid title CSS selector"));
+        
         Ok(Title::new(
             ctx.select(book_title_selector)
                 .map(|node| node.text().collect::<String>())
