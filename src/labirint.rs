@@ -67,7 +67,8 @@ impl BookParser for LabirintParser {
                     last_err = Some(e);
                     if attempt < MAX_RETRIES {
                         let wait = (1_u64 << (attempt as u32)).min(8);
-                        warn!(target: "time", attempt, wait, "Network error, retrying immediately");
+                        warn!(target: "time", attempt, wait, "Network error, retrying after backoff");
+                        tokio::time::sleep(Duration::from_secs(wait)).await;
                         continue;
                     }
                 }

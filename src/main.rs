@@ -74,7 +74,6 @@ async fn parse_sitemap_igraslov(sitemap: &str) -> anyhow::Result<Vec<String>> {
 }
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    parse_sitemap_igraslov(URL2[0]).await?;
     println!("HELP: parser <at_once> <how_much_from_one_store");
     println!("OPTIONAL: <at_once> How much parse at moment, must be >=1");
     println!("OPTIONAL: <how_much_from_one_store>, must be >=1");
@@ -107,13 +106,14 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let how_much_url_process_at_once_source = 20;
 
-    let urls_labirint = urlset
+    let urls_labirint: Vec<String> = urlset
         .urls
         .into_iter()
         .map(|u| u.loc)
         .filter(|u| u.contains("/books/"))
-        .take(how_much_url_process_at_once_source);
-    let urls_igraslov = {
+        .take(how_much_url_process_at_once_source)
+        .collect();
+    let urls_igraslov: Vec<String> = {
         let mut books: Vec<String> = vec![];
         if parse_from_one > 1000 {
             let mut first_part = parse_sitemap_igraslov(URL2[0]).await?;
@@ -126,8 +126,11 @@ async fn main() -> Result<(), anyhow::Error> {
         books
     }
     .into_iter()
-    .take(how_much_url_process_at_once_source);
-    let urls = interleave(urls_igraslov, urls_labirint);
+    .take(how_much_url_process_at_once_source)
+    .collect();
+    let urls: Vec<String> = interleave(urls_igraslov.clone().into_iter(), urls_labirint.clone().into_iter()).collect();
+
+    let total = urls.len() as u64;
 
     let counter = Arc::new(AtomicU64::new(0));
     let books: Vec<_> = stream::iter(urls)
@@ -142,8 +145,8 @@ async fn main() -> Result<(), anyhow::Error> {
                 } else {
                     todo!()
                 }
-                let processed = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                println!("processed: {processed}/{}", 2 * parse_from_one);
+                let processed = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                println!("processed: {processed}/{total}");
                 result
             }
         })
