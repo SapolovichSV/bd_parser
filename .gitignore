@@ -5,7 +5,6 @@ books.csv
 labirint.csv
 proof.html
 proof.txt
-page_examples/*.html
 # Logs
 *.log
 # OS/editor junk
