@@ -4,8 +4,7 @@ use tracing::{instrument, warn};
 
 use crate::parse_traits::{self, Author, BookParser, Isbn, Sites, Title};
 static AUTHOR_SEL_STR: &str = "tr.woocommerce-product-attributes-item:nth-child(1) > td:nth-child(2) > p:nth-child(1) > a:nth-child(1)";
-static ISBN_SEL_STR: &str =
-    "tr.woocommerce-product-attributes-item:nth-child(7) > td:nth-child(2) > p:nth-child(1)";
+static ISBN_SEL_STR: &str = "tr.woocommerce-product-attributes-item--attribute_pa_isbn-issn-1 td p";
 static TITLE_SEL_STR: &str = ".single-post-title";
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -63,7 +62,6 @@ impl BookParser for IgraSlov {
             .collect())
     }
     #[instrument(skip(self, ctx, _log_url))]
-    // TODO fix selector https://igraslov.store/product/serebryakov-a-fistula-gorodets-klap/
     async fn parse_isbn(&self, ctx: &Self::Context, _log_url: &Self::Url) -> anyhow::Result<Isbn> {
         let isbn_selector =
             ISBN_SEL.get_or_init(|| scraper::Selector::parse(ISBN_SEL_STR).expect("isbn selector"));
@@ -90,11 +88,17 @@ impl BookParser for IgraSlov {
     async fn parse_title(&self, ctx: &Self::Context, log_url: &Self::Url) -> anyhow::Result<Title> {
         let book_title_selector = TITLE_SEL
             .get_or_init(|| scraper::Selector::parse(TITLE_SEL_STR).expect("title selector"));
-        Ok(Title::new(
-            ctx.select(book_title_selector)
+        let title = {
+            let mut title = ctx
+                .select(book_title_selector)
                 .map(|node| node.text().collect::<String>())
-                .collect::<String>(),
-        ))
+                .collect::<String>();
+            if let Some(striped) = title.strip_prefix("_") {
+                title = striped.to_string();
+            }
+            title
+        };
+        Ok(Title::new(title))
     }
 }
 

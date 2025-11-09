@@ -79,12 +79,13 @@ async fn main() -> Result<(), anyhow::Error> {
     println!("OPTIONAL: <how_much_from_one_store>, must be >=1");
     println!("<at_once> default value={DEFAULT_PARSE_COUNT}");
     println!("<how_much_from_one_store default value = {PARSE_FROM_ONE_SITE}");
-    let mut parse_count = DEFAULT_PARSE_COUNT;
-    let mut parse_from_one = PARSE_FROM_ONE_SITE;
+    let mut max_concurrent_parses = DEFAULT_PARSE_COUNT; // сколько книг парсится одновременно
+    let mut max_parses_per_source = PARSE_FROM_ONE_SITE; // сколько книг парсится с одного сайта
+
     for (i, arg) in std::env::args().skip(1).enumerate() {
         let (processing, name_var) = match i {
-            0 => (&mut parse_count, "<at_once>"),
-            1 => (&mut parse_from_one, "<how_much_from_one_store>"),
+            0 => (&mut max_concurrent_parses, "<at_once>"),
+            1 => (&mut max_parses_per_source, "<how_much_from_one_store>"),
             _ => return Err(anyhow!("too much env args")),
         };
         let num: usize = arg.parse()?;
@@ -93,7 +94,7 @@ async fn main() -> Result<(), anyhow::Error> {
         } else {
             return Err(anyhow!("given {name_var} is not a num or < 1"));
         }
-        info!("{name_var} value = {}", *processing);
+        println!("{name_var} value = {}", *processing);
     }
     let _guard = init_tracing().map_err(|e| anyhow!("{e}"))?;
     info!(target: "time", "starting parser");
@@ -104,18 +105,16 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut wtr = csv::Writer::from_path("books.csv")?;
     wtr.write_record(BOOK_CSV_HEADERS)?;
 
-    let how_much_url_process_at_once_source = 20;
-
     let urls_labirint: Vec<String> = urlset
         .urls
         .into_iter()
         .map(|u| u.loc)
         .filter(|u| u.contains("/books/"))
-        .take(how_much_url_process_at_once_source)
+        .take(max_parses_per_source)
         .collect();
     let urls_igraslov: Vec<String> = {
         let mut books: Vec<String> = vec![];
-        if parse_from_one > 1000 {
+        if max_parses_per_source > 1000 {
             let mut first_part = parse_sitemap_igraslov(URL2[0]).await?;
             let mut second_part = parse_sitemap_igraslov(URL2[1]).await?;
             books.append(&mut first_part);
@@ -123,12 +122,17 @@ async fn main() -> Result<(), anyhow::Error> {
         } else {
             books.append(&mut parse_sitemap_igraslov(URL2[0]).await?);
         }
+        info!("urls_igraslov.len = {}", books.len());
         books
     }
     .into_iter()
-    .take(how_much_url_process_at_once_source)
+    .take(max_parses_per_source)
     .collect();
-    let urls: Vec<String> = interleave(urls_igraslov.clone().into_iter(), urls_labirint.clone().into_iter()).collect();
+    let urls: Vec<String> = interleave(
+        urls_igraslov.clone().into_iter(),
+        urls_labirint.clone().into_iter(),
+    )
+    .collect();
 
     let total = urls.len() as u64;
 
@@ -150,7 +154,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 result
             }
         })
-        .buffer_unordered(parse_count)
+        .buffer_unordered(max_concurrent_parses)
         .collect()
         .await;
     for book in books.iter() {
