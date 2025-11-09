@@ -78,7 +78,7 @@ impl BookParser for IgraSlov {
                 }
             }
             None => {
-                warn!(target: "time","ISBN not found on page");
+                warn!(target: "time","ISBN not found on page {_log_url}");
                 Err(anyhow!("can't find isbn on this page"))
             }
         }

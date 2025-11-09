@@ -6,6 +6,7 @@ use futures::{StreamExt, stream};
 use quick_xml::de::from_str;
 use serde::Deserialize;
 
+use crate::eksmo::EksmoParser;
 use crate::igraslov::IgraSlov;
 use crate::labirint::*;
 use crate::parse_traits::{Book, BookParser};
@@ -28,9 +29,14 @@ struct UrlSet {
     urls: Vec<BookUrl>,
 }
 const URL1: &str = "https://www.labirint.ru/smcatalog2.xml";
-const URL2: [&str; 2] = [
+const URL2: [&str; 7] = [
     "https://igraslov.store/product-sitemap.xml",
     "https://igraslov.store/product-sitemap2.xml",
+    "https://igraslov.store/product-sitemap3.xml",
+    "https://igraslov.store/product-sitemap4.xml",
+    "https://igraslov.store/product-sitemap5.xml",
+    "https://igraslov.store/product-sitemap6.xml",
+    "https://igraslov.store/product-sitemap7.xml",
 ];
 const URL3: [&str; 8] = get_sitemaps_eksmo();
 const fn get_sitemaps_eksmo() -> [&'static str; 8] {
@@ -98,6 +104,19 @@ async fn parse_sitemap_igraslov(sitemap: &str) -> anyhow::Result<Vec<String>> {
         .filter(|url| BOOK_INDICATORS.iter().any(|pat| url.contains(pat)))
         .collect())
 }
+#[instrument(skip(sitemap))]
+async fn parse_sitemap_labirint(sitemap: &str) -> anyhow::Result<Vec<String>> {
+    let resp = reqwest::get(sitemap).await?.text().await?;
+    let urlset: UrlSet = from_str(&resp)?;
+    info!(target: "time", count = urlset.urls.len(), "fetched sitemap urls");
+
+    Ok(urlset
+        .urls
+        .into_iter()
+        .map(|u| u.loc)
+        .filter(|u| u.contains("/books/"))
+        .collect())
+}
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     println!("HELP: parser <at_once> <how_much_from_one_store");
@@ -124,43 +143,34 @@ async fn main() -> Result<(), anyhow::Error> {
     }
     let _guard = init_tracing().map_err(|e| anyhow!("{e}"))?;
     info!(target: "time", "starting parser");
-    let resp = reqwest::get(URL1).await?.text().await?;
-    let urlset: UrlSet = from_str(&resp)?;
-    info!(target: "time", count = urlset.urls.len(), "fetched sitemap urls");
 
     let mut wtr = csv::Writer::from_path("books.csv")?;
     wtr.write_record(BOOK_CSV_HEADERS)?;
 
-    let urls_labirint: Vec<String> = urlset
-        .urls
+    let urls_labirint: Vec<String> = parse_sitemap_labirint(URL1)
+        .await?
         .into_iter()
-        .map(|u| u.loc)
-        .filter(|u| u.contains("/books/"))
         .take(max_parses_per_source)
         .collect();
+    println!("urls_labirint have {} books", urls_labirint.len());
     let urls_igraslov: Vec<String> = {
         let mut books: Vec<String> = vec![];
-        if max_parses_per_source > 1000 {
-            let mut first_part = parse_sitemap_igraslov(URL2[0]).await?;
-            let mut second_part = parse_sitemap_igraslov(URL2[1]).await?;
-            books.append(&mut first_part);
-            books.append(&mut second_part);
-        } else {
-            books.append(&mut parse_sitemap_igraslov(URL2[0]).await?);
+        for sitemap in URL2 {
+            books.append(&mut parse_sitemap_igraslov(sitemap).await?);
         }
-        info!("urls_igraslov.len = {}", books.len());
         books
     }
     .into_iter()
     .take(max_parses_per_source)
     .collect();
+    println!("urls_igraslov have {} books", urls_igraslov.len());
     let urls_eksmo: Vec<String> = parse_sitemaps_eksmo(URL3)
         .await?
         .into_iter()
         .take(max_parses_per_source)
         .collect();
-    println!("url eksmo at 1005 {}", urls_eksmo[1005]);
-    todo!();
+    println!("urls_eksmo have {} books", urls_eksmo.len());
+
     let mut urls: Vec<String> =
         interleave(urls_igraslov.into_iter(), urls_labirint.into_iter()).collect();
     urls = interleave(urls.into_iter(), urls_eksmo.into_iter()).collect();
@@ -176,8 +186,10 @@ async fn main() -> Result<(), anyhow::Error> {
                     result = parse_book_page(&LabirintParser, url).await;
                 } else if url.contains("igraslov") {
                     result = parse_book_page(&IgraSlov, url).await;
+                } else if url.contains("eksmo") {
+                    result = parse_book_page(&EksmoParser, url).await;
                 } else {
-                    todo!()
+                    panic!("unknown url : {url}");
                 }
                 let processed = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                 println!("processed: {processed}/{total}");
@@ -187,16 +199,18 @@ async fn main() -> Result<(), anyhow::Error> {
         .buffer_unordered(max_concurrent_parses)
         .collect()
         .await;
+    let mut success = 0;
     for book in books.iter() {
         match book {
             Ok(book) => {
                 info!("succesfull parsed book with url {}", book.source);
+                success += 1;
                 book.write_csv_record(&mut wtr)?
             }
             Err(e) => warn!("book unsuccesfull parse {e}"),
         }
     }
-
+    println!("succesfull parsed {success}/{total}");
     wtr.flush()?;
     Ok(())
 }

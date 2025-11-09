@@ -113,7 +113,7 @@ impl BookParser for LabirintParser {
                 }
             }
             None => {
-                warn!(target: "time","ISBN not found on page");
+                warn!(target: "time","ISBN not found on page {url}");
                 Err(anyhow!("can't find isbn on this page"))
             }
         }
