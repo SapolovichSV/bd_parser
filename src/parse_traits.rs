@@ -117,12 +117,14 @@ impl Display for Title {
 pub enum Sites {
     Labirint,
     IgraSlov,
+    Eksmo,
 }
 impl Display for Sites {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Labirint => write!(f, "labirint"),
             Self::IgraSlov => write!(f, "igra_slov"),
+            Self::Eksmo => write!(f, "eksmo"),
         }
     }
 }

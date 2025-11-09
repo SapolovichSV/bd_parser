@@ -9,8 +9,9 @@ use serde::Deserialize;
 use crate::igraslov::IgraSlov;
 use crate::labirint::*;
 use crate::parse_traits::{Book, BookParser};
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 mod csv_save;
+mod eksmo;
 mod igraslov;
 mod labirint;
 mod parse_traits;
@@ -31,8 +32,33 @@ const URL2: [&str; 2] = [
     "https://igraslov.store/product-sitemap.xml",
     "https://igraslov.store/product-sitemap2.xml",
 ];
+const URL3: [&str; 8] = get_sitemaps_eksmo();
+const fn get_sitemaps_eksmo() -> [&'static str; 8] {
+    [
+        "https://eksmo.ru/sitemap/books1.xml",
+        "https://eksmo.ru/sitemap/books2.xml",
+        "https://eksmo.ru/sitemap/books3.xml",
+        "https://eksmo.ru/sitemap/books4.xml",
+        "https://eksmo.ru/sitemap/books5.xml",
+        "https://eksmo.ru/sitemap/books6.xml",
+        "https://eksmo.ru/sitemap/books7.xml",
+        "https://eksmo.ru/sitemap/books8.xml",
+    ]
+}
+// const URL3:[&str;_]
 static DEFAULT_PARSE_COUNT: usize = 3;
 static PARSE_FROM_ONE_SITE: usize = 1500;
+#[instrument(skip(sitemaps))]
+async fn parse_sitemaps_eksmo(sitemaps: [&str; 8]) -> anyhow::Result<Vec<String>> {
+    let mut books_url = vec![];
+    for sitemap in sitemaps {
+        let resp = reqwest::get(sitemap).await?.text().await?;
+        let mut urlset: UrlSet = from_str(&resp)?;
+        info!(target: "time", count = urlset.urls.len(), "fetched sitemap urls");
+        books_url.append(&mut urlset.urls);
+    }
+    Ok(books_url.into_iter().map(|x| x.loc).collect())
+}
 async fn parse_sitemap_igraslov(sitemap: &str) -> anyhow::Result<Vec<String>> {
     let resp = reqwest::get(sitemap)
         .await
@@ -128,12 +154,16 @@ async fn main() -> Result<(), anyhow::Error> {
     .into_iter()
     .take(max_parses_per_source)
     .collect();
-    let urls: Vec<String> = interleave(
-        urls_igraslov.clone().into_iter(),
-        urls_labirint.clone().into_iter(),
-    )
-    .collect();
-
+    let urls_eksmo: Vec<String> = parse_sitemaps_eksmo(URL3)
+        .await?
+        .into_iter()
+        .take(max_parses_per_source)
+        .collect();
+    println!("url eksmo at 1005 {}", urls_eksmo[1005]);
+    todo!();
+    let mut urls: Vec<String> =
+        interleave(urls_igraslov.into_iter(), urls_labirint.into_iter()).collect();
+    urls = interleave(urls.into_iter(), urls_eksmo.into_iter()).collect();
     let total = urls.len() as u64;
 
     let counter = Arc::new(AtomicU64::new(0));
