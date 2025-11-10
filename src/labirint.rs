@@ -233,6 +233,14 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_parse_description() {
+        let parser = LabirintParser;
+        let ctx = create_test_context();
+        let descr = parser.parse_description(&ctx).await.expect("descr ok");
+        assert!(descr.as_str().trim().len() > 10);
+    }
+
+    #[tokio::test]
     async fn test_fetch_invalid_url() {
         let parser = LabirintParser;
         let invalid_url = "https://www.labirint.ru/invalid/".to_string();
