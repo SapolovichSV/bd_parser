@@ -6,7 +6,7 @@ use crate::parse_traits::{self, Author, BookParser, Description, Isbn, Sites, Ti
 static AUTHOR_SEL_STR: &str = "tr.woocommerce-product-attributes-item:nth-child(1) > td:nth-child(2) > p:nth-child(1) > a:nth-child(1)";
 static ISBN_SEL_STR: &str = "tr.woocommerce-product-attributes-item--attribute_pa_isbn-issn-1 td p";
 static TITLE_SEL_STR: &str = ".single-post-title";
-static DESCR_SEL_STR: &str = "div.spoiler__text > p:nth-child(1)";
+static DESCR_SEL_STR: &str = ".woocommerce-product-details__short-description > p:nth-child(1)";
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
@@ -168,5 +168,13 @@ mod tests {
         let url = "https://igraslov.store/product/example".to_string();
         let res = parser.parse_isbn(&html, &url).await;
         assert!(res.is_err());
+    }
+    #[tokio::test]
+    async fn parse_descr() {
+        let parser = IgraSlov;
+        let ctx = load_html();
+        let url = "https://igraslov.store/product/example".to_string();
+        let descr = parser.parse_description(&ctx).await.expect("should");
+        assert!(descr.as_str().len() > 10);
     }
 }

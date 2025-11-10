@@ -7,7 +7,7 @@ use tracing::{info, instrument, warn};
 static AUTHOR_SEL_STR: &str = "._left_u86in_12 > div:nth-child(1) > div:nth-child(2)";
 static ISBN_SEL_STR: &str = "._right_u86in_12 > div:nth-child(2) > div:nth-child(2)";
 static TITLE_SEL_STR: &str = "._h1_5o36c_18";
-static DESCR_SEL_STR: &str = "div.spoiler__text > p:nth-child(1)";
+static DESCR_SEL_STR: &str = "._wrapper_1rsml_1 > div:nth-child(1) > div:nth-child(1)";
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
@@ -174,9 +174,9 @@ mod tests {
 
     const TEST_HTML: &str = include_str!("../page_examples/labirint.html");
     const TEST_URL: &str = "https://www.labirint.ru/books/123456/";
-    const EXPECTED_ISBN: &str = "9785171234567";
-    const EXPECTED_TITLE: &str = "Война и мир";
-    const EXPECTED_AUTHOR: &str = "Лев Толстой";
+    const EXPECTED_ISBN: &str = "9781473227989";
+    const EXPECTED_TITLE: &str = "Ninth House: Leigh Bardugo";
+    const EXPECTED_AUTHOR: &str = "Bardugo Leigh";
 
     fn create_test_context() -> scraper::Html {
         scraper::Html::parse_document(TEST_HTML)
@@ -206,7 +206,7 @@ mod tests {
         assert!(result.is_ok(), "parse_isbn failed: {:?}", result.err());
 
         let isbn = result.unwrap();
-        assert_eq!(isbn.as_str(), "978-5-17-123456-7");
+        assert_eq!(isbn.as_str(), EXPECTED_ISBN);
     }
 
     #[tokio::test]
@@ -250,7 +250,7 @@ mod tests {
     }
 
     #[tokio::test]
-    // #[ignore = "502 gateaway probably banned"]
+    #[ignore = "502 gateaway probably banned"]
     async fn test_parse_book_integration() {
         let parser = LabirintParser;
         let url = "https://www.labirint.ru/books/801841/".to_string();

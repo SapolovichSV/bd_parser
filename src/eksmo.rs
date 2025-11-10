@@ -8,7 +8,8 @@ use crate::parse_traits::{Author, BookParser, Description, Isbn, Sites, Title};
 static AUTHOR_SEL_STR: &str = ".book-page__card-author-link";
 static ISBN_SEL_STR: &str = "span.copy__val";
 static TITLE_SEL_STR: &str = ".book-page__card-title";
-static DESCR_SEL_STR: &str = "div.spoiler__text > p:nth-child(1)";
+static DESCR_SEL_STR: &str =
+    "div.spoiler__text.t.t_last-p-no-offset.book-page__card-description-text p";
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
@@ -118,8 +119,9 @@ impl BookParser for EksmoParser {
             .get_or_init(|| scraper::Selector::parse(DESCR_SEL_STR).expect("descr selector"));
         let descr = ctx
             .select(book_descr_sel)
-            .map(|node| node.text().collect::<String>())
-            .collect();
+            .map(|p| p.text().collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
         Ok(Description::new(descr))
     }
     #[instrument(skip(self),fields(url=&url))]
@@ -151,6 +153,25 @@ mod tests {
     const EXPECTED_TITLE: &str =
         "Структура таланта. От иллюзий к реальности: как стать настоящим художником";
 
+    const EXPECTED_DESCRIPTION: &str = r###"Книга, которая поможет взглянуть на феномен «таланта» без розовых очков.
+
+Андрей Самарин, российский художественный деятель, преподаватель и основатель студии рисования, разбирает мифы о врожденных способностях и показывает, что за успехом всегда стоят конкретные навыки, практика и систематический подход. С опорой на психологические исследования, истории из разных сфер и практические рекомендации книга объясняет, как формируются способности, как их развивать и почему одни добиваются результата, а другие так и остаются пребывать в иллюзиях.
+
+Внутри:
+
+- доступное объяснение, как работает «талант» с точки зрения науки;
+
+- реальные истории и кейсы, подтверждающие выводы автора;
+
+- стратегии, которые помогут развивать собственные навыки и перестать ждать чуда;
+
+- советы по созданию условий для роста в учебе, работе и творчестве.
+
+Эта книга — находка для всех, кто хочет развить свой потенциал, перестать верить в явление урожденного гения и понять, как устроен истинный путь к мастерству. Подходит студентам, педагогам, руководителям и всем, кто интересуется развитием человека.
+
+Что такое талант и как его обрести?
+
+В книге "Структура таланта" художник Андрей Самарин исследует внутренний мир творцов, особенности их мышления и подхода к искусству. Автор раскрывает, как сочетание уникального восприятия, дисциплины, смелости и внутренней честности формирует путь к успеху. Вместе с ним вы разберете, что такое талант, с точки зрения когнитивного навыка. Вы разоблачите мифы и иллюзии, связанные с творческими профессиями. В практической части на примере рисования автор расскажет, какой подход в обучении по-настоящему эффективен и какие существуют неочевидные, но ключевые нюансы, о которых не говорят в традиционных программах. Вы поговорите об искусстве, мастерстве и творчестве, их месте на рынке в условиях инклюзивного тренда, а также о влиянии ИИ на развитие современного художника и других факторах, определяющих его новую роль."###;
     fn get_context() -> scraper::Html {
         let context = include_str!("../page_examples/eksmo.html");
         scraper::Html::parse_document(context)
@@ -188,7 +209,24 @@ mod tests {
         let title = parser.parse_title(&ctx, &url).await.expect("title parsed");
         assert_eq!(title.as_str(), EXPECTED_TITLE);
     }
+    fn normalize_text(s: &str) -> String {
+        s.replace("\r", "") // убрать \r, если есть
+            .lines() // пройтись по строкам
+            .map(|l| l.trim()) // обрезать пробелы по краям
+            .filter(|l| !l.is_empty()) // убрать пустые строки
+            .collect::<Vec<_>>()
+            .join("\n") // собрать с одним переносом
+    }
 
+    #[tokio::test]
+    async fn parse_description() {
+        let parser = EksmoParser;
+        let ctx = get_context();
+        let descr = parser.parse_description(&ctx).await.expect("should");
+        let descr = normalize_text(descr.as_str());
+        let expected = normalize_text(EXPECTED_DESCRIPTION);
+        assert_eq!(descr, expected);
+    }
     #[tokio::test]
     async fn parse_isbn_not_found() {
         let parser = EksmoParser;
