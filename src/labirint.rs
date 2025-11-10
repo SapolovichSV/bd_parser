@@ -1,4 +1,4 @@
-use crate::parse_traits::{self, Author, BookParser, Isbn, Sites, Title};
+use crate::parse_traits::{self, Author, BookParser, Description, Isbn, Sites, Title};
 use anyhow::anyhow;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -7,10 +7,13 @@ use tracing::{info, instrument, warn};
 static AUTHOR_SEL_STR: &str = "._left_u86in_12 > div:nth-child(1) > div:nth-child(2)";
 static ISBN_SEL_STR: &str = "._right_u86in_12 > div:nth-child(2) > div:nth-child(2)";
 static TITLE_SEL_STR: &str = "._h1_5o36c_18";
+static DESCR_SEL_STR: &str = "div.spoiler__text > p:nth-child(1)";
+
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static ISBN_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static TITLE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+static DESCR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 const MAX_RETRIES: u8 = 1;
 pub struct LabirintParser;
 impl BookParser for LabirintParser {
@@ -132,6 +135,19 @@ impl BookParser for LabirintParser {
                 .collect::<String>(),
         ))
     }
+    #[instrument(skip(self, ctx))]
+    async fn parse_description(
+        &self,
+        ctx: &Self::Context,
+    ) -> anyhow::Result<crate::parse_traits::Description> {
+        let book_descr_sel = DESCR_SEL
+            .get_or_init(|| scraper::Selector::parse(DESCR_SEL_STR).expect("descr selector"));
+        let descr = ctx
+            .select(book_descr_sel)
+            .map(|node| node.text().collect::<String>())
+            .collect();
+        Ok(Description::new(descr))
+    }
     #[instrument(skip(self), fields(url=%url))]
     async fn parse_book(&self, url: Self::Url) -> anyhow::Result<parse_traits::Book<Self::Url>> {
         info!(target: "time","start processing");
@@ -139,6 +155,7 @@ impl BookParser for LabirintParser {
         let authors = self.parse_authors(&ctx, &url).await?;
         let title = self.parse_title(&ctx, &url).await?;
         let isbn = self.parse_isbn(&ctx, &url).await?;
+        let description = self.parse_description(&ctx).await?;
         info!(target: "time","ended processing");
         Ok(parse_traits::Book {
             authors,
@@ -146,6 +163,7 @@ impl BookParser for LabirintParser {
             source: url,
             title,
             site: Self::SITE,
+            description,
         })
     }
 }
@@ -154,28 +172,7 @@ impl BookParser for LabirintParser {
 mod tests {
     use super::*;
 
-    const TEST_HTML: &str = r#"
-<!DOCTYPE html>
-<html>
-<body>
-    <div class="_left_u86in_12">
-        <div>
-            <div>Автор:</div>
-            <div>Лев Толстой</div>
-        </div>
-    </div>
-    <div class="_right_u86in_12">
-        <div>Placeholder</div>
-        <div>
-            <div>ISBN Label</div>
-            <div>978-5-17-123456-7</div>
-        </div>
-    </div>
-    <h1 class="_h1_5o36c_18">Война и мир</h1>
-</body>
-</html>
-"#;
-
+    const TEST_HTML: &str = include_str!("../page_examples/labirint.html");
     const TEST_URL: &str = "https://www.labirint.ru/books/123456/";
     const EXPECTED_ISBN: &str = "9785171234567";
     const EXPECTED_TITLE: &str = "Война и мир";

@@ -3,15 +3,18 @@ use std::{sync::OnceLock, time::Duration};
 use anyhow::anyhow;
 use tracing::{instrument, warn};
 
-use crate::parse_traits::{Author, BookParser, Isbn, Sites, Title};
+use crate::parse_traits::{Author, BookParser, Description, Isbn, Sites, Title};
 
 static AUTHOR_SEL_STR: &str = ".book-page__card-author-link";
 static ISBN_SEL_STR: &str = "span.copy__val";
 static TITLE_SEL_STR: &str = ".book-page__card-title";
+static DESCR_SEL_STR: &str = "div.spoiler__text > p:nth-child(1)";
+
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static ISBN_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static TITLE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+static DESCR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 pub struct EksmoParser;
 impl BookParser for EksmoParser {
     const SITE: crate::parse_traits::Sites = Sites::Eksmo;
@@ -106,6 +109,19 @@ impl BookParser for EksmoParser {
         Ok(Title::new(title))
     }
 
+    #[instrument(skip(self, ctx))]
+    async fn parse_description(
+        &self,
+        ctx: &Self::Context,
+    ) -> anyhow::Result<crate::parse_traits::Description> {
+        let book_descr_sel = DESCR_SEL
+            .get_or_init(|| scraper::Selector::parse(DESCR_SEL_STR).expect("descr selector"));
+        let descr = ctx
+            .select(book_descr_sel)
+            .map(|node| node.text().collect::<String>())
+            .collect();
+        Ok(Description::new(descr))
+    }
     #[instrument(skip(self),fields(url=&url))]
     async fn parse_book(
         &self,
@@ -115,12 +131,14 @@ impl BookParser for EksmoParser {
         let authors = self.parse_authors(&ctx, &url).await?;
         let title = self.parse_title(&ctx, &url).await?;
         let isbn = self.parse_isbn(&ctx, &url).await?;
+        let description = self.parse_description(&ctx).await?;
         Ok(crate::parse_traits::Book {
             authors,
             isbn,
             source: url,
             title,
             site: Self::SITE,
+            description,
         })
     }
 }

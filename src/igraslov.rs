@@ -2,15 +2,17 @@ use anyhow::anyhow;
 use std::{sync::OnceLock, time::Duration};
 use tracing::{instrument, warn};
 
-use crate::parse_traits::{self, Author, BookParser, Isbn, Sites, Title};
+use crate::parse_traits::{self, Author, BookParser, Description, Isbn, Sites, Title};
 static AUTHOR_SEL_STR: &str = "tr.woocommerce-product-attributes-item:nth-child(1) > td:nth-child(2) > p:nth-child(1) > a:nth-child(1)";
 static ISBN_SEL_STR: &str = "tr.woocommerce-product-attributes-item--attribute_pa_isbn-issn-1 td p";
 static TITLE_SEL_STR: &str = ".single-post-title";
+static DESCR_SEL_STR: &str = "div.spoiler__text > p:nth-child(1)";
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static ISBN_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static TITLE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+static DESCR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 pub struct IgraSlov;
 impl BookParser for IgraSlov {
     const SITE: parse_traits::Sites = Sites::IgraSlov;
@@ -99,6 +101,20 @@ impl BookParser for IgraSlov {
             title
         };
         Ok(Title::new(title))
+    }
+
+    #[instrument(skip(self, ctx))]
+    async fn parse_description(
+        &self,
+        ctx: &Self::Context,
+    ) -> anyhow::Result<crate::parse_traits::Description> {
+        let book_descr_sel = DESCR_SEL
+            .get_or_init(|| scraper::Selector::parse(DESCR_SEL_STR).expect("descr selector"));
+        let descr = ctx
+            .select(book_descr_sel)
+            .map(|node| node.text().collect::<String>())
+            .collect();
+        Ok(Description::new(descr))
     }
 }
 
