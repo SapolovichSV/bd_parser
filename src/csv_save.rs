@@ -4,8 +4,15 @@ use reqwest::IntoUrl;
 
 use crate::parse_traits::Book;
 
-pub static BOOK_CSV_HEADERS: &[&str] =
-    &["site", "source", "isbn", "title", "authors", "description"];
+pub static BOOK_CSV_HEADERS: &[&str] = &[
+    "site",
+    "source",
+    "isbn",
+    "title",
+    "authors",
+    "description",
+    "price",
+];
 
 pub trait CsvSave {
     fn write_csv_record<W: std::io::Write>(&self, wtr: &mut csv::Writer<W>) -> csv::Result<()>;
@@ -30,6 +37,7 @@ where
             self.title.to_string(),
             authors_joined,
             self.description.as_str().to_string(),
+            self.price.to_string(),
         ])
     }
 }

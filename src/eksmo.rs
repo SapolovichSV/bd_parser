@@ -1,21 +1,23 @@
 use std::{sync::OnceLock, time::Duration};
 
 use anyhow::anyhow;
-use tracing::{instrument, warn};
+use tracing::{debug, instrument, warn};
 
-use crate::parse_traits::{Author, BookParser, Description, Isbn, Sites, Title};
+use crate::parse_traits::{Author, BookParser, Description, Isbn, Price, Sites, Title};
 
 static AUTHOR_SEL_STR: &str = ".book-page__card-author-link";
 static ISBN_SEL_STR: &str = "span.copy__val";
 static TITLE_SEL_STR: &str = ".book-page__card-title";
 static DESCR_SEL_STR: &str =
     "div.spoiler__text.t.t_last-p-no-offset.book-page__card-description-text p";
+static PRICE_SEL_STR: &str = "div.price-insert__price";
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static ISBN_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static TITLE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static DESCR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+static PRICE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 pub struct EksmoParser;
 impl BookParser for EksmoParser {
     const SITE: crate::parse_traits::Sites = Sites::Eksmo;
@@ -124,25 +126,50 @@ impl BookParser for EksmoParser {
             .join("\n");
         Ok(Description::new(descr))
     }
-    #[instrument(skip(self),fields(url=&url))]
-    async fn parse_book(
-        &self,
-        url: Self::Url,
-    ) -> anyhow::Result<crate::parse_traits::Book<Self::Url>> {
-        let ctx = self.fetch(&url).await?;
-        let authors = self.parse_authors(&ctx, &url).await?;
-        let title = self.parse_title(&ctx, &url).await?;
-        let isbn = self.parse_isbn(&ctx, &url).await?;
-        let description = self.parse_description(&ctx).await?;
-        Ok(crate::parse_traits::Book {
-            authors,
-            isbn,
-            source: url,
-            title,
-            site: Self::SITE,
-            description,
-        })
+    #[instrument(skip(self, ctx))]
+    async fn parse_price(&self, ctx: &Self::Context) -> anyhow::Result<crate::parse_traits::Price> {
+        let price_descr_sel =
+            PRICE_SEL.get_or_init(|| scraper::Selector::parse(PRICE_SEL_STR).expect("should be"));
+        let mut price: String = ctx
+            .select(price_descr_sel)
+            .take(1)
+            .map(|node| node.text().collect::<String>().replace("₽", ""))
+            .collect();
+        price = price.trim().to_string();
+        price.push_str("00");
+        debug!(price);
+        let price: Price = match price.parse() {
+            Ok(price) => price,
+            Err(e) => {
+                warn!("can't parse price {e}");
+                return Err(e);
+            }
+        };
+        Ok(price)
     }
+    // #[instrument(skip(self),fields(url=&url))]
+    // async fn parse_book(
+    //     &self,
+    //     url: Self::Url,
+    // ) -> anyhow::Result<crate::parse_traits::Book<Self::Url>> {
+    //     let ctx = self.fetch(&url).await?;
+
+    //     let authors = self.parse_authors(&ctx, &url).await?;
+    //     let title = self.parse_title(&ctx, &url).await?;
+    //     let isbn = self.parse_isbn(&ctx, &url).await?;
+    //     let description = self.parse_description(&ctx).await?;
+    //     let price = self.parse_price(&ctx).await?;
+
+    //     Ok(crate::parse_traits::Book {
+    //         authors,
+    //         isbn,
+    //         source: url,
+    //         title,
+    //         site: Self::SITE,
+    //         description,
+    //         price,
+    //     })
+    // }
 }
 #[cfg(test)]
 mod tests {
@@ -172,6 +199,7 @@ mod tests {
 Что такое талант и как его обрести?
 
 В книге "Структура таланта" художник Андрей Самарин исследует внутренний мир творцов, особенности их мышления и подхода к искусству. Автор раскрывает, как сочетание уникального восприятия, дисциплины, смелости и внутренней честности формирует путь к успеху. Вместе с ним вы разберете, что такое талант, с точки зрения когнитивного навыка. Вы разоблачите мифы и иллюзии, связанные с творческими профессиями. В практической части на примере рисования автор расскажет, какой подход в обучении по-настоящему эффективен и какие существуют неочевидные, но ключевые нюансы, о которых не говорят в традиционных программах. Вы поговорите об искусстве, мастерстве и творчестве, их месте на рынке в условиях инклюзивного тренда, а также о влиянии ИИ на развитие современного художника и других факторах, определяющих его новую роль."###;
+    const EXPECTED_PRICE: u128 = 146900;
     fn get_context() -> scraper::Html {
         let context = include_str!("../page_examples/eksmo.html");
         scraper::Html::parse_document(context)
@@ -209,23 +237,30 @@ mod tests {
         let title = parser.parse_title(&ctx, &url).await.expect("title parsed");
         assert_eq!(title.as_str(), EXPECTED_TITLE);
     }
-    fn normalize_text(s: &str) -> String {
-        s.replace("\r", "") // убрать \r, если есть
-            .lines() // пройтись по строкам
-            .map(|l| l.trim()) // обрезать пробелы по краям
-            .filter(|l| !l.is_empty()) // убрать пустые строки
-            .collect::<Vec<_>>()
-            .join("\n") // собрать с одним переносом
-    }
 
     #[tokio::test]
     async fn parse_description() {
+        fn normalize_text(s: &str) -> String {
+            s.replace("\r", "") // убрать \r, если есть
+                .lines() // пройтись по строкам
+                .map(|l| l.trim()) // обрезать пробелы по краям
+                .filter(|l| !l.is_empty()) // убрать пустые строки
+                .collect::<Vec<_>>()
+                .join("\n") // собрать с одним переносом
+        }
         let parser = EksmoParser;
         let ctx = get_context();
         let descr = parser.parse_description(&ctx).await.expect("should");
         let descr = normalize_text(descr.as_str());
         let expected = normalize_text(EXPECTED_DESCRIPTION);
         assert_eq!(descr, expected);
+    }
+    #[tokio::test]
+    async fn parse_price() {
+        let parser = EksmoParser;
+        let ctx = get_context();
+        let price = parser.parse_price(&ctx).await.expect("must be");
+        assert_eq!(u128::from(price), EXPECTED_PRICE)
     }
     #[tokio::test]
     async fn parse_isbn_not_found() {

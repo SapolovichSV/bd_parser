@@ -1,19 +1,21 @@
-use crate::parse_traits::{self, Author, BookParser, Description, Isbn, Sites, Title};
+use crate::parse_traits::{self, Author, BookParser, Description, Isbn, Price, Sites, Title};
 use anyhow::anyhow;
 use std::sync::OnceLock;
 use std::time::Duration;
-use tracing::{info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 static AUTHOR_SEL_STR: &str = "._left_u86in_12 > div:nth-child(1) > div:nth-child(2)";
 static ISBN_SEL_STR: &str = "._right_u86in_12 > div:nth-child(2) > div:nth-child(2)";
 static TITLE_SEL_STR: &str = "._h1_5o36c_18";
 static DESCR_SEL_STR: &str = "._wrapper_1rsml_1 > div:nth-child(1) > div:nth-child(1)";
+static PRICE_SEL_STR: &str = ".text-bold-28-md-32";
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static ISBN_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static TITLE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static DESCR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+static PRICE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 const MAX_RETRIES: u8 = 1;
 pub struct LabirintParser;
 impl BookParser for LabirintParser {
@@ -148,24 +150,45 @@ impl BookParser for LabirintParser {
             .collect();
         Ok(Description::new(descr))
     }
-    #[instrument(skip(self), fields(url=%url))]
-    async fn parse_book(&self, url: Self::Url) -> anyhow::Result<parse_traits::Book<Self::Url>> {
-        info!(target: "time","start processing");
-        let ctx = self.fetch(&url).await?;
-        let authors = self.parse_authors(&ctx, &url).await?;
-        let title = self.parse_title(&ctx, &url).await?;
-        let isbn = self.parse_isbn(&ctx, &url).await?;
-        let description = self.parse_description(&ctx).await?;
-        info!(target: "time","ended processing");
-        Ok(parse_traits::Book {
-            authors,
-            isbn,
-            source: url,
-            title,
-            site: Self::SITE,
-            description,
-        })
+    async fn parse_price(&self, ctx: &Self::Context) -> anyhow::Result<parse_traits::Price> {
+        let book_price_sel =
+            PRICE_SEL.get_or_init(|| scraper::Selector::parse(PRICE_SEL_STR).unwrap());
+        let mut price: String = ctx
+            .select(book_price_sel)
+            .map(|node| node.text().collect::<String>())
+            .collect();
+        price = price.replace("\u{a0}", "");
+        price.push_str("00");
+        debug!(price);
+        let price: Price = match price.parse() {
+            Ok(price) => price,
+            Err(e) => {
+                warn!("can't parse price : {e:?}");
+                return Err(e);
+            }
+        };
+        Ok(price)
     }
+    // #[instrument(skip(self), fields(url=%url))]
+    // async fn parse_book(&self, url: Self::Url) -> anyhow::Result<parse_traits::Book<Self::Url>> {
+    //     info!(target: "time","start processing");
+    //     let ctx = self.fetch(&url).await?;
+    //     let authors = self.parse_authors(&ctx, &url).await?;
+    //     let title = self.parse_title(&ctx, &url).await?;
+    //     let isbn = self.parse_isbn(&ctx, &url).await?;
+    //     let description = self.parse_description(&ctx).await?;
+    //     let price = self.parse_price(&ctx).await?;
+    //     info!(target: "time","ended processing");
+    //     Ok(parse_traits::Book {
+    //         authors,
+    //         isbn,
+    //         source: url,
+    //         title,
+    //         site: Self::SITE,
+    //         description,
+    //         price,
+    //     })
+    // }
 }
 
 #[cfg(test)]
@@ -174,9 +197,10 @@ mod tests {
 
     const TEST_HTML: &str = include_str!("../page_examples/labirint.html");
     const TEST_URL: &str = "https://www.labirint.ru/books/123456/";
-    const EXPECTED_ISBN: &str = "9781473227989";
-    const EXPECTED_TITLE: &str = "Ninth House: Leigh Bardugo";
-    const EXPECTED_AUTHOR: &str = "Bardugo Leigh";
+    const EXPECTED_ISBN: &str = "978-5-9268-3015-3";
+    const EXPECTED_TITLE: &str = "Джейн Эйр: Шарлотта Бронте";
+    const EXPECTED_AUTHOR: &str = "Бронте Шарлотта";
+    const EXPECTED_PRICE: u128 = 108400;
 
     fn create_test_context() -> scraper::Html {
         scraper::Html::parse_document(TEST_HTML)
@@ -247,6 +271,13 @@ mod tests {
 
         let result = parser.fetch(&invalid_url).await;
         assert!(result.is_err());
+    }
+    #[tokio::test]
+    async fn test_parce_price() {
+        let parser = LabirintParser;
+        let ctx = create_test_context();
+        let price = parser.parse_price(&ctx).await.expect("should");
+        assert_eq!(u128::from(price), EXPECTED_PRICE);
     }
 
     #[tokio::test]

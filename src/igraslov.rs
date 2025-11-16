@@ -1,18 +1,20 @@
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use std::{sync::OnceLock, time::Duration};
-use tracing::{instrument, warn};
+use tracing::{debug, instrument, warn};
 
-use crate::parse_traits::{self, Author, BookParser, Description, Isbn, Sites, Title};
+use crate::parse_traits::{self, Author, BookParser, Description, Isbn, Price, Sites, Title};
 static AUTHOR_SEL_STR: &str = "tr.woocommerce-product-attributes-item:nth-child(1) > td:nth-child(2) > p:nth-child(1) > a:nth-child(1)";
 static ISBN_SEL_STR: &str = "tr.woocommerce-product-attributes-item--attribute_pa_isbn-issn-1 td p";
 static TITLE_SEL_STR: &str = ".single-post-title";
 static DESCR_SEL_STR: &str = ".woocommerce-product-details__short-description > p:nth-child(1)";
+static PRICE_SEL_STR: &str = "p.price > span:nth-child(1) > bdi:nth-child(1)";
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static AUTHOR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static ISBN_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static TITLE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 static DESCR_SEL: OnceLock<scraper::Selector> = OnceLock::new();
+static PRICE_SEL: OnceLock<scraper::Selector> = OnceLock::new();
 pub struct IgraSlov;
 impl BookParser for IgraSlov {
     const SITE: parse_traits::Sites = Sites::IgraSlov;
@@ -116,12 +118,66 @@ impl BookParser for IgraSlov {
             .collect();
         Ok(Description::new(descr))
     }
+
+    async fn parse_price(&self, ctx: &Self::Context) -> anyhow::Result<parse_traits::Price> {
+        let price_sel = PRICE_SEL
+            .get_or_init(|| scraper::Selector::parse(PRICE_SEL_STR).expect("price selector"));
+        let mut price_string: String = match ctx.select(price_sel).next_back() {
+            Some(elref) => elref.text().collect(),
+            None => return Err(anyhow!("can't parse price")),
+        };
+        let forbidden_symb = [',', '\u{a0}', '₽'];
+        price_string.retain(|x| !forbidden_symb.contains(&x));
+        debug!(price_string);
+        let price = match price_string.parse() {
+            Ok(price) => price,
+            Err(e) => {
+                warn!("can't parse price : {e}");
+                return Err(e);
+            }
+        };
+        Ok(price)
+    }
+    // #[instrument(skip(self),fields(url=&url))]
+    // async fn parse_book(&self, url: Self::Url) -> anyhow::Result<parse_traits::Book<Self::Url>> {
+    //     let ctx = self.fetch(&url).await?;
+    //     let authors = self
+    //         .parse_authors(&ctx, &url)
+    //         .await
+    //         .with_context(|| format!("fetch failed: {}", url))?;
+    //     let title = self
+    //         .parse_title(&ctx, &url)
+    //         .await
+    //         .with_context(|| format!("fetch failed: {}", url))?;
+    //     let isbn = self
+    //         .parse_isbn(&ctx, &url)
+    //         .await
+    //         .with_context(|| format!("fetch failed: {}", url))?;
+    //     let description = self
+    //         .parse_description(&ctx)
+    //         .await
+    //         .with_context(|| format!("fetch failed: {}", url))?;
+    //     let price = self
+    //         .parse_price(&ctx)
+    //         .await
+    //         .with_context(|| format!("fetch failed: {}", url))?;
+    //     Ok(parse_traits::Book {
+    //         authors,
+    //         isbn,
+    //         source: url,
+    //         title,
+    //         site: Self::SITE,
+    //         description,
+    //         price,
+    //     })
+    // }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    const EXPECTED_PRICE: u128 = 89500;
 
     fn load_html() -> scraper::Html {
         let html = fs::read_to_string("page_examples/igraslov.html").expect("read igraslov.html");
@@ -176,5 +232,12 @@ mod tests {
         let url = "https://igraslov.store/product/example".to_string();
         let descr = parser.parse_description(&ctx).await.expect("should");
         assert!(descr.as_str().len() > 10);
+    }
+    #[tokio::test]
+    async fn parse_price() {
+        let parser = IgraSlov;
+        let ctx = load_html();
+        let price = parser.parse_price(&ctx).await.expect("should be");
+        assert_eq!(u128::from(price), EXPECTED_PRICE);
     }
 }
