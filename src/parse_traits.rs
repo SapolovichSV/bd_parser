@@ -132,7 +132,7 @@ impl Display for Sites {
 pub struct Description(String);
 impl Description {
     pub fn new(s: String) -> Self {
-        Self { 0: s }
+        Self(s)
     }
     pub fn as_str(&self) -> &str {
         &self.0
